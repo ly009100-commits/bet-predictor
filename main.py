@@ -1,7 +1,7 @@
 """
-🏆 每日比赛预测系统 - 手动触发版
+🏆 比赛预测系统 - PushPlus 微信推送版
 """
-import os, json, sys
+import os, sys
 import numpy as np
 import pandas as pd
 import requests
@@ -9,10 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from scipy.stats import poisson
 
-# ===== 配置 =====
 ODDS_KEY = os.environ["ODDS_API_KEY"]
-TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
+PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 
 LEAGUES = {
     "soccer_epl": "🏴 英超",
@@ -25,38 +23,31 @@ LEAGUES = {
 
 
 def fetch_matches():
-    """拉取赔率数据"""
     all_data = []
     for sport, name in LEAGUES.items():
         try:
             r = requests.get(
                 f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                params={
-                    "apiKey": ODDS_KEY,
-                    "regions": "eu",
-                    "markets": "h2h,totals",
-                    "oddsFormat": "decimal",
-                },
+                params={"apiKey": ODDS_KEY, "regions": "eu",
+                        "markets": "h2h,totals", "oddsFormat": "decimal"},
                 timeout=15,
             )
             if r.status_code != 200:
                 continue
-            print(f"  {name}: {len(r.json())} 场 (剩余 {r.headers.get('x-requests-remaining','?')})")
+            print(f"  {name}: {len(r.json())} 场")
 
             for g in r.json():
                 h2h = {}
-                totals_over = totals_under = None
+                to = tu = None
                 for bk in g.get("bookmakers", []):
                     for m in bk.get("markets", []):
                         if m["key"] == "h2h" and not h2h:
                             h2h = {o["name"]: o["price"] for o in m["outcomes"]}
-                        if m["key"] == "totals" and totals_over is None:
+                        if m["key"] == "totals" and to is None:
                             for o in m["outcomes"]:
                                 if o.get("point") == 2.5:
-                                    if o["name"] == "Over":
-                                        totals_over = o["price"]
-                                    else:
-                                        totals_under = o["price"]
+                                    if o["name"] == "Over": to = o["price"]
+                                    else: tu = o["price"]
 
                 if h2h.get(g["home_team"]) and h2h.get(g["away_team"]):
                     all_data.append({
@@ -67,8 +58,7 @@ def fetch_matches():
                         "o1": h2h[g["home_team"]],
                         "oX": h2h.get("Draw"),
                         "o2": h2h[g["away_team"]],
-                        "o_over": totals_over,
-                        "o_under": totals_under,
+                        "o_over": to, "o_under": tu,
                     })
         except Exception as e:
             print(f"  {name}: {e}")
@@ -76,11 +66,9 @@ def fetch_matches():
 
 
 def predict(row):
-    """泊松预测"""
     imp1, impX, imp2 = 1 / row["o1"], 1 / row["oX"], 1 / row["o2"]
     total = imp1 + impX + imp2
     ph, pd_, pa = imp1 / total, impX / total, imp2 / total
-
     hxg = 1.35 * (ph + 0.5 * pd_) * 1.25
     axg = 1.35 * (pa + 0.5 * pd_) * 0.85
 
@@ -91,32 +79,111 @@ def predict(row):
     hw = float(np.sum(np.tril(m, -1)))
     dr = float(np.sum(np.diag(m)))
     aw = float(np.sum(np.triu(m, 1)))
-
     g = np.fromfunction(lambda i, j: i + j, (10, 10), dtype=int)
     o25 = float(np.sum(m[g > 2.5]))
-
     idx = np.unravel_index(np.argmax(m), m.shape)
 
     return {
         "hw": round(hw * 100, 1), "dr": round(dr * 100, 1), "aw": round(aw * 100, 1),
         "o25": round(o25 * 100, 1),
         "score": f"{idx[0]}-{idx[1]}",
-        "pick": "🏠主胜" if hw > aw and hw > dr else ("🚌客胜" if aw > hw else "🤝平局"),
-        "hxg": round(hxg, 2), "axg": round(axg, 2),
+        "pick": "主胜" if hw > aw and hw > dr else ("客胜" if aw > hw else "平局"),
     }
 
 
 def kelly(prob, odds, frac=0.25):
     b = odds - 1
     p = prob / 100
-    q = 1 - p
-    full = (b * p - q) / b
+    full = (b * p - (1 - p)) / b
     return round(full * frac * 100, 2) if full > 0 else None
 
 
-def find_bets(df):
-    bets = []
+def push_wechat(title, content):
+    """PushPlus 微信推送"""
+    if not PUSHPLUS_TOKEN:
+        print("[PushPlus] 未配置 Token，跳过推送")
+        return
+    try:
+        r = requests.post(
+            "http://www.pushplus.plus/send",
+            json={"token": PUSHPLUS_TOKEN, "title": title, "content": content,
+                  "template": "html"},
+            timeout=10,
+        )
+        result = r.json()
+        if result.get("code") == 200:
+            print(f"[PushPlus] ✅ 微信推送成功")
+        else:
+            print(f"[PushPlus] ❌ {result}")
+    except Exception as e:
+        print(f"[PushPlus] ❌ {e}")
+
+
+def build_html(pred_df, bets_df):
+    """生成 HTML 格式报告"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    html = f"""
+    <h2>📊 比赛预测报告</h2>
+    <p style='color:#888'>{now}</p>
+    <hr>
+    """
+
+    if not bets_df.empty:
+        html += "<h3>💰 价值投注推荐</h3><ul>"
+        for _, r in bets_df.head(5).iterrows():
+            html += (
+                f"<li><b>{r['home']} vs {r['away']}</b><br>"
+                f"{r['bet']} @{r['odds']:.2f} | "
+                f"胜率 {r['prob']:.1f}% | EV +{r['ev']*100:.1f}% | "
+                f"凯利 {r['kelly']:.1f}%</li>"
+            )
+        html += "</ul><hr>"
+
+    html += "<h3>⚽ 今日所有预测</h3><ul>"
+    for _, r in pred_df.iterrows():
+        html += (
+            f"<li><b>{r['home']}</b> vs <b>{r['away']}</b> "
+            f"<span style='color:#888'>({r['league']})</span><br>"
+            f"预测: {r['pick']} | 比分: {r['score']}<br>"
+            f"主{r['hw']}% / 平{r['dr']}% / 客{r['aw']}% | "
+            f"大2.5: {r['o25']}%<br>"
+            f"赔率: {r['o1']}/{r['oX']}/{r['o2']}</li>"
+    )
+    html += "</ul>"
+
+    html += "<p style='color:#999;font-size:12px'>⚠️ 仅供研究参考，不构成投注建议</p>"
+    return html
+
+
+def main():
+    print(f"\n{'='*60}")
+    print(f"🏆 比赛预测 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"{'='*60}\n")
+
+    # 1. 采集
+    print("📥 [1/3] 拉取赔率数据...")
+    df = fetch_matches()
+    if df.empty:
+        print("❌ 无数据")
+        push_wechat("❌ 比赛预测失败", "<p>今日无比赛数据</p>")
+        return
+    print(f"✅ 共 {len(df)} 场\n")
+
+    # 2. 预测
+    print("🧠 [2/3] 泊松模型预测...")
+    results = []
     for _, r in df.iterrows():
+        try:
+            results.append({**r.to_dict(), **predict(r)})
+        except:
+            pass
+    pred = pd.DataFrame(results)
+    print(f"✅ {len(pred)} 场预测完成\n")
+
+    # 3. 凯利筛选
+    print("💰 [3/3] 凯利公式筛选...")
+    bets = []
+    for _, r in pred.iterrows():
         for t, o, p in [("主胜", r.get("o1"), r.get("hw")),
                          ("客胜", r.get("o2"), r.get("aw")),
                          ("大2.5", r.get("o_over"), r.get("o25"))]:
@@ -125,90 +192,28 @@ def find_bets(df):
                 ev = (p / 100) * o - 1
                 if k and ev > 0.02:
                     bets.append({**r, "bet": t, "odds": o, "prob": p, "ev": ev, "kelly": k})
-    out = pd.DataFrame(bets)
-    return out.sort_values("ev", ascending=False) if not out.empty else out
-
-
-def send_tg(text):
-    if not TG_TOKEN or not TG_CHAT:
-        print("[TG] 未配置")
-        return
-    r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                      json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML"}, timeout=10)
-    print(f"[TG] {'✅' if r.ok else '❌'}")
-
-
-def build_msg(pred_df, bets_df):
-    now = datetime.now().strftime("%m-%d %H:%M")
-    lines = [f"<b>📊 每日比赛预测</b> ({now})\n"]
-
+    bets_df = pd.DataFrame(bets)
     if not bets_df.empty:
-        lines.append("<b>💰 价值投注</b>")
-        for _, r in bets_df.head(5).iterrows():
-            lines.append(
-                f"• {r['home']} vs {r['away']}\n"
-                f"  <b>{r['bet']}</b> @{r['odds']:.2f}  "
-                f"胜率{r['prob']:.1f}% EV+{r['ev']*100:.1f}%"
-            )
-        lines.append("")
+        bets_df = bets_df.sort_values("ev", ascending=False)
+    print(f"✅ 发现 {len(bets_df)} 个价值机会\n")
 
-    lines.append("<b>⚽ 今日预测</b>")
-    for _, r in pred_df.iterrows():
-        lines.append(
-            f"<b>{r['home']}</b> vs <b>{r['away']}</b>\n"
-            f"  {r['pick']} ({r['score']})  "
-            f"主{r['hw']}% 平{r['dr']}% 客{r['aw']}%  "
-            f"大2.5:{r['o25']}%"
-        )
-
-    lines.append("\n<i>⚠️ 仅供研究，非投注建议</i>")
-    return "\n".join(lines)
-
-
-def main():
-    print(f"\n{'='*50}")
-    print(f"🏆 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'='*50}\n")
-
-    print("📥 [1/3] 拉取赔率...")
-    df = fetch_matches()
-    if df.empty:
-        print("❌ 无数据"); return
-    print(f"✅ {len(df)} 场\n")
-
-    print("🧠 [2/3] 泊松预测...")
-    results = []
-    for _, r in df.iterrows():
-        try:
-            results.append({**r.to_dict(), **predict(r)})
-        except:
-            pass
-    pred = pd.DataFrame(results)
-    print(f"✅ {len(pred)} 场\n")
-
-    print("💰 [3/3] 凯利筛选...")
-    bets = find_bets(pred)
-    print(f"✅ {len(bets)} 个机会\n")
-
-    # 输出
+    # 终端输出
     for _, r in pred.iterrows():
-        print(f"  {r['home']} vs {r['away']} → {r['pick']} {r['score']} | 大2.5:{r['o25']}%")
-    if not bets.empty:
-        print(f"\n💎 价值投注 Top 3:")
-        for _, r in bets.head(3).iterrows():
-            print(f"  {r['bet']} @{r['odds']:.2f} 胜率{r['prob']:.1f}% EV+{r['ev']*100:.1f}%")
+        print(f"  {r['home']} vs {r['away']} → {r['pick']} {r['score']}")
+    if not bets_df.empty:
+        print(f"\n💎 价值投注:")
+        for _, r in bets_df.head(5).iterrows():
+            print(f"  {r['bet']} @{r['odds']:.2f} EV+{r['ev']*100:.1f}%")
 
-    msg = build_msg(pred, bets)
-    send_tg(msg)
+    # 微信推送
+    html = build_html(pred, bets_df)
+    push_wechat("📊 今日比赛预测", html)
 
-    # 保存
+    # 保存 CSV
     Path("results").mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     pred.to_csv(f"results/pred_{ts}.csv", index=False)
-    if not bets.empty:
-        bets.to_csv(f"results/bets_{ts}.csv", index=False)
-
-    print("\n✅ 完成!")
+    print(f"\n✅ 完成！")
 
 
 if __name__ == "__main__":
