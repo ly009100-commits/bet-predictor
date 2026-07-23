@@ -25,8 +25,10 @@ def _call_odds_api(sport_key: str, api_key: str) -> list:
         r = requests.get(url, params=params, timeout=15)
         if r.status_code == 200:
             return r.json()
-    except:
-        pass
+        else:
+            print(f"      ⚠️ HTTP {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        print(f"      ⚠️ 请求失败: {e}")
     return []
 
 
@@ -88,11 +90,12 @@ def _call_api_sports(base_url: str, endpoint: str, api_key: str) -> dict:
 
 def _search_team_id_football(team_name: str, league_id: int, api_key: str) -> int | None:
     """API-Football 队名搜索 → team_id"""
+    if not api_key:
+        return None
     data = _call_api_sports(API_FOOTBALL_BASE,
                             f"teams?search={team_name}", api_key)
     for team in data.get("response", []):
         tid = team["team"]["id"]
-        # 验证该队确实属于目标联赛
         league_data = _call_api_sports(
             API_FOOTBALL_BASE,
             f"teams/statistics?team={tid}&league={league_id}&season=2025",
@@ -105,6 +108,8 @@ def _search_team_id_football(team_name: str, league_id: int, api_key: str) -> in
 
 def _search_team_id_basketball(team_name: str, league_id: int, api_key: str) -> int | None:
     """API-Basketball 队名搜索"""
+    if not api_key:
+        return None
     data = _call_api_sports(API_BASKETBALL_BASE,
                             f"teams?search={team_name}", api_key)
     for team in data.get("response", []):
@@ -121,6 +126,8 @@ def _search_team_id_basketball(team_name: str, league_id: int, api_key: str) -> 
 
 def _search_team_id_nfl(team_name: str, league_id: int, api_key: str) -> int | None:
     """API-NFL 队名搜索"""
+    if not api_key:
+        return None
     data = _call_api_sports(API_AMERICAN_FOOTBALL_BASE,
                             f"teams?search={team_name}", api_key)
     for team in data.get("response", []):
@@ -137,6 +144,8 @@ def _search_team_id_nfl(team_name: str, league_id: int, api_key: str) -> int | N
 
 def _get_football_stats(team_id: int, league_id: int, api_key: str) -> dict:
     """API-Football 球队统计"""
+    if not api_key:
+        return {}
     data = _call_api_sports(
         API_FOOTBALL_BASE,
         f"teams/statistics?team={team_id}&league={league_id}&season=2025",
@@ -167,6 +176,8 @@ def _get_football_stats(team_id: int, league_id: int, api_key: str) -> dict:
 
 def _get_basketball_stats(team_id: int, league_id: int, api_key: str) -> dict:
     """API-Basketball 球队统计"""
+    if not api_key:
+        return {}
     data = _call_api_sports(
         API_BASKETBALL_BASE,
         f"teams/statistics?id={team_id}&league={league_id}&season=2025-2026",
@@ -190,6 +201,8 @@ def _get_basketball_stats(team_id: int, league_id: int, api_key: str) -> dict:
 
 def _get_nfl_stats(team_id: int, league_id: int, api_key: str) -> dict:
     """API-NFL 球队统计"""
+    if not api_key:
+        return {}
     data = _call_api_sports(
         API_AMERICAN_FOOTBALL_BASE,
         f"teams/statistics?id={team_id}&league={league_id}&season=2025",
@@ -221,12 +234,17 @@ def _collect_from_odds(sport_dict: dict, api_key: str, start, end,
         league_name = info["name"] if isinstance(info, dict) else info
         games = _call_odds_api(sport_key, api_key)
 
+        print(f"    [{league_name}] Odds API 返回 {len(games)} 条")
+        passed = 0
         for g in games:
             odds = _extract_odds(g, has_draw)
-            if odds is None or odds["time"] is None:
+            if odds is None:
+                continue
+            if odds["time"] is None:
                 continue
             if odds["time"] < start or odds["time"] > end:
                 continue
+            passed += 1
 
             odds["sport_key"]  = sport_key
             odds["league"]     = league_name
@@ -268,6 +286,8 @@ def _collect_from_odds(sport_dict: dict, api_key: str, start, end,
                             odds["stats_away"] = _get_nfl_stats(away_id, league_id, api_sports_key)
 
             matches.append(odds)
+
+        print(f"      通过过滤: {passed} 场")
     return matches
 
 
@@ -327,7 +347,6 @@ def fetch_all(odds_key: str, foot_key: str, basket_key: str,
 
     all_matches.sort(key=lambda m: m["time"] or datetime.max)
 
-    # 统计战绩覆盖情况
     with_stats = sum(1 for m in all_matches if m.get("stats_home") or m.get("stats_away"))
     print(f"[数据采集] 总计 {len(all_matches)} 场 (含战绩 {with_stats} 场)\n")
 
