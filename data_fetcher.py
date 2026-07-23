@@ -89,7 +89,6 @@ def _call_api_sports(base_url: str, endpoint: str, api_key: str) -> dict:
 
 
 def _search_team_id_football(team_name: str, league_id: int, api_key: str) -> int | None:
-    """API-Football 队名搜索 → team_id"""
     if not api_key:
         return None
     data = _call_api_sports(API_FOOTBALL_BASE,
@@ -107,7 +106,6 @@ def _search_team_id_football(team_name: str, league_id: int, api_key: str) -> in
 
 
 def _search_team_id_basketball(team_name: str, league_id: int, api_key: str) -> int | None:
-    """API-Basketball 队名搜索"""
     if not api_key:
         return None
     data = _call_api_sports(API_BASKETBALL_BASE,
@@ -125,7 +123,6 @@ def _search_team_id_basketball(team_name: str, league_id: int, api_key: str) -> 
 
 
 def _search_team_id_nfl(team_name: str, league_id: int, api_key: str) -> int | None:
-    """API-NFL 队名搜索"""
     if not api_key:
         return None
     data = _call_api_sports(API_AMERICAN_FOOTBALL_BASE,
@@ -143,7 +140,6 @@ def _search_team_id_nfl(team_name: str, league_id: int, api_key: str) -> int | N
 
 
 def _get_football_stats(team_id: int, league_id: int, api_key: str) -> dict:
-    """API-Football 球队统计"""
     if not api_key:
         return {}
     data = _call_api_sports(
@@ -175,7 +171,6 @@ def _get_football_stats(team_id: int, league_id: int, api_key: str) -> dict:
 
 
 def _get_basketball_stats(team_id: int, league_id: int, api_key: str) -> dict:
-    """API-Basketball 球队统计"""
     if not api_key:
         return {}
     data = _call_api_sports(
@@ -200,7 +195,6 @@ def _get_basketball_stats(team_id: int, league_id: int, api_key: str) -> dict:
 
 
 def _get_nfl_stats(team_id: int, league_id: int, api_key: str) -> dict:
-    """API-NFL 球队统计"""
     if not api_key:
         return {}
     data = _call_api_sports(
@@ -234,15 +228,31 @@ def _collect_from_odds(sport_dict: dict, api_key: str, start, end,
         league_name = info["name"] if isinstance(info, dict) else info
         games = _call_odds_api(sport_key, api_key)
 
+        if not games:
+            continue
+
         print(f"    [{league_name}] Odds API 返回 {len(games)} 条")
+
+        # 打印前 5 条的时间（调试用）
+        for g in games[:5]:
+            commence = g.get("commence_time", "?")
+            ht = g.get("home_team", "?")
+            at = g.get("away_team", "?")
+            print(f"      样例: {ht} vs {at} | 开赛={commence}")
+
         passed = 0
+        time_out = 0
+        odds_fail = 0
+
         for g in games:
             odds = _extract_odds(g, has_draw)
             if odds is None:
+                odds_fail += 1
                 continue
             if odds["time"] is None:
                 continue
             if odds["time"] < start or odds["time"] > end:
+                time_out += 1
                 continue
             passed += 1
 
@@ -287,7 +297,7 @@ def _collect_from_odds(sport_dict: dict, api_key: str, start, end,
 
             matches.append(odds)
 
-        print(f"      通过过滤: {passed} 场")
+        print(f"      通过: {passed} | 超时: {time_out} | 赔率不完整: {odds_fail}")
     return matches
 
 
