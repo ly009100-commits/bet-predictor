@@ -21,5 +21,4 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          WINDOW_HOURS: "96"
         run: python main.py
