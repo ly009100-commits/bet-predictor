@@ -15,8 +15,8 @@ FOOTBALL_LEAGUES = {
     "soccer_france_ligue_one":           {"name": "法甲",      "api_football_id": 61},
     "soccer_uefa_champs_league":         {"name": "欧冠",      "api_football_id": 2},
     "soccer_uefa_europa_league":         {"name": "欧联",      "api_football_id": 3},
-    "soccer_uefa_european_championship":  {"name": "欧洲杯",    "api_football_id": 4},
-"soccer_usa_mls":                     {"name": "MLS",      "api_football_id": 253},
+    "soccer_uefa_european_championship": {"name": "欧洲杯",    "api_football_id": 4},
+    "soccer_usa_mls":                    {"name": "MLS",       "api_football_id": 253},
 }
 
 # ========== 篮球联赛 ==========
