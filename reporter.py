@@ -14,13 +14,14 @@ def _build_html(analyzed: list, window_str: str) -> str:
     <hr>
     """
 
-    # ---- 汇总表 ----
+    # ---- 汇总表（加了预测列）----
     html += """
     <h3>📋 预测汇总</h3>
     <table border='1' cellpadding='5' cellspacing='0'
            style='border-collapse:collapse;width:100%;font-size:12px'>
     <tr style='background:#2c3e50;color:#fff'>
       <th>时间</th><th>赛事</th><th>对阵</th>
+      <th>预测</th><th>比分</th>
       <th>市场赔率</th><th>公平赔率</th>
       <th>信心</th><th>风险</th>
     </tr>
@@ -29,6 +30,8 @@ def _build_html(analyzed: list, window_str: str) -> str:
         t = m["time"].strftime("%m/%d %H:%M") if m["time"] else "?"
         league = m.get("league", "?")
         matchup = f"{m['home']} vs {m['away']}"
+        pred_result = m["pred_result"]
+        pred_score = m.get("pred_score", "-")
 
         if m["has_draw"]:
             base = f"{m['o1']:.2f}/{m['oX']:.2f}/{m['o2']:.2f}"
@@ -42,9 +45,19 @@ def _build_html(analyzed: list, window_str: str) -> str:
         if m["ev"] > 0.05:
             ev_tag = f" 🔥EV+{m['ev']*100:.0f}%"
 
+        # 预测结果加色
+        if "主胜" in pred_result:
+            pred_color = "#27ae60"
+        elif "客胜" in pred_result:
+            pred_color = "#e74c3c"
+        else:
+            pred_color = "#f39c12"
+
         html += f"""
         <tr>
           <td>{t}</td><td>{league}</td><td>{matchup}</td>
+          <td style='color:{pred_color};font-weight:bold'>{pred_result}</td>
+          <td>{pred_score}</td>
           <td>{base}</td><td>{fair}</td>
           <td>{conf_stars} {m['confidence']}{ev_tag}</td>
           <td>{m['risk']}</td>
@@ -67,13 +80,12 @@ def _build_html(analyzed: list, window_str: str) -> str:
         else:
             html += f"胜率: 主{m['prob_home']}% / 客{m['prob_away']}%<br>"
 
-        # 近期战绩
         if m.get("form_home") or m.get("form_away"):
             hf = m.get("form_home", "-")
             af = m.get("form_away", "-")
             html += f"近期: {m['home']} {hf} | {m['away']} {af}<br>"
         else:
-            html += "近期: 无战绩数据<br>"
+            html += f"近期: 无战绩数据<br>"
 
         html += f"信心: {'⭐'*m['confidence']} {m['confidence']}/10 | 风险: {m['risk']}"
         if m["ev"] > 0.03:
