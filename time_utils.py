@@ -9,6 +9,7 @@ def calculate_time_window():
     """
     返回 24 小时窗口
     非整点取下一个整点
+    返回 naive datetime，与 data_fetcher 统一
     """
     now = datetime.now(BEIJING_TZ)
 
@@ -19,8 +20,12 @@ def calculate_time_window():
 
     end = start + timedelta(hours=24)
 
+    # 去掉时区，与 data_fetcher 的比赛时间一致
+    start_naive = start.replace(tzinfo=None)
+    end_naive = end.replace(tzinfo=None)
+
     window_str = (
         f"{start.strftime('%m/%d %H:00')} → "
         f"{end.strftime('%m/%d %H:00')} (北京时间)"
     )
-    return start, end, window_str
+    return start_naive, end_naive, window_str
